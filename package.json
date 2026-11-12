@@ -1,6 +1,6 @@
 {
   "name": "@sqid-dev/playground",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A real-looking website (Driftwood, a desk company) with a Sqid panel docked on the side: watch a visitor get identified, try the scenarios and recipes, see the record that goes out, then go live on your own site.",
   "license": "MIT",
   "type": "module",
