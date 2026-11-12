@@ -7,7 +7,6 @@
   const cap = (s) => String(s || '').replace(/\b[a-z]/g, c => c.toUpperCase());
   const first = (v) => cap(v?.firstName || (v?.name || '').split(' ')[0] || '') || null;
   const company = (v) => v?.company ? cap(v.company) : null;
-  const sizeOf = (v) => v?.company_size || v?.job_company_size || null;
 
   const RECIPES = {
     dom : {
@@ -34,31 +33,37 @@ engine.on('visitor.unknown', () => {
     },
     pricing : {
       title : 'Pricing personalisation', where : '/pricing', docs : 'https://docs.sqid.dev/recipes/pricing-personalization',
-      code : `const engine = new squid.engine();
+      code : `// Sqid tells you who the visitor is. Which plan fits them is your data:
+// route the profile through your backend and let it answer.
+const engine = new squid.engine({ sp: 'https://api.example.com' });
 
 engine.on('visitor.identified', (e) => {
-  const v = e.detail;
-  const size = v.company_size || '';
-  const team = /^(1[01]-|51-|201-)/.test(size);   // 10 to 500 people
-  document.querySelector('#pricing-title').textContent = \`Team pricing for \${v.company}\`;
-  document.querySelector('#plan-team').classList.toggle('featured', team);
+  const v = e.detail;                    // Sqid's traits + your fields
+  document.querySelector('#pricing-title').textContent = \`Pricing for \${v.company}\`;
+  document.querySelector(\`#plan-\${v.accountType.toLowerCase()}\`).classList.add('featured');
 });`,
       apply(v, on){
         if(page() !== 'pricing'){ return; }
+        this._on = on;
         let t = document.getElementById('pricing-title'), s = document.getElementById('pricing-sub'), pill = document.getElementById('pricing-pill');
-        let team = document.getElementById('plan-team'), badge = document.getElementById('plan-team-badge'), ent = document.getElementById('plan-enterprise');
-        let size = sizeOf(v) || '';
-        let big = /^(1001|5001|10001)/.test(size), mid = /^(11-|51-|201-|501-)/.test(size);
-        if(v && on){
-          t.textContent = `Team pricing for ${company(v)}`;
-          s.textContent = big ? `Companies your size usually roll out by floor. Enterprise is where ${company(v)} fits.` : mid ? `Teams of ${size} get volume pricing and a dedicated account manager.` : `Start with one desk; the Team tier is there when ${company(v)} grows.`;
+        let plans = { starter : document.getElementById('plan-starter'), team : document.getElementById('plan-team'), enterprise : document.getElementById('plan-enterprise') };
+        let badge = document.getElementById('plan-team-badge');
+        const reset = () => { t.textContent = t.dataset.default; s.textContent = s.dataset.default; pill.classList.add('hidden'); badge.classList.add('hidden'); Object.values(plans).forEach(p => p.classList.remove('featured')); };
+        const show = (d) => {
+          if(!this._on){ return; }
+          let plan = String(d.accountType || '').toLowerCase();
+          t.textContent = `Pricing for ${company(d)}`;
+          s.textContent = `Your account is on ${d.accountType}. (That came from the mock "your database", not from Sqid: Sqid supplied who you are.)`;
           pill.classList.remove('hidden');
-          team.classList.toggle('featured', mid); badge.classList.toggle('hidden', !mid);
-          ent.classList.toggle('featured', big);
-        } else {
-          t.textContent = t.dataset.default; s.textContent = s.dataset.default; pill.classList.add('hidden');
-          team.classList.remove('featured'); badge.classList.add('hidden'); ent.classList.remove('featured');
-        }
+          Object.entries(plans).forEach(([k, el]) => el.classList.toggle('featured', k === plan));
+          badge.classList.toggle('hidden', plan !== 'team');
+        };
+        if(!(v && on)){ reset(); return; }
+        if(this._last){ show(this._last); }
+        if(this._engine || !window.squid?.engine){ return; }
+        // The same service-provider pattern the docs recipe uses, against the playground's mock backend.
+        this._engine = new window.squid.engine({ sp : location.origin + '/_sqid/sp' });
+        this._engine.on('visitor.identified', e => { this._last = e.detail; show(e.detail); });
       }
     },
     chat : {
@@ -128,15 +133,16 @@ document.addEventListener('mouseleave', (e) => {
 
 engine.on('visitor.identified', (e) => {
   const v = e.detail;
-  // GA4 / Segment / Mixpanel / Amplitude / PostHog: one identify call each
-  window.gtag?.('set', 'user_properties', { company: v.company, role: v.company_role });
-  window.analytics?.identify(v.id, { email: v.email, company: v.company });
-  window.posthog?.identify(v.id, { email: v.email });
+  const uid = v.id || engine.visitor().meta.user_id;   // your id if you set one, else Sqid's
+  // Segment / Mixpanel / Amplitude / PostHog: one identify call each
+  window.analytics?.identify(uid, { email: v.email, company: v.company, title: v.company_role });
+  window.posthog?.identify(uid, { email: v.email, company: v.company });
 });`,
       apply(v, on){
         if(!(v && on)){ return; }
-        console.log('[analytics] identify', { id : v.id, email : v.email, company : v.company, role : v.company_role });
-        document.dispatchEvent(new CustomEvent('sqid:recipe', { detail : { recipe : 'analytics', text : `identify(${v.id}) sent to the analytics stubs (see the console)` } }));
+        let uid = v.id || document.cookie.match(/squid_vid=([^;]+)/)?.[1] || null;
+        console.log('[analytics] identify', uid, { email : v.email, company : v.company, title : v.company_role });
+        document.dispatchEvent(new CustomEvent('sqid:recipe', { detail : { recipe : 'analytics', text : `identify(${uid}) sent to the analytics stubs (see the browser console)` } }));
       }
     },
     sp : {
