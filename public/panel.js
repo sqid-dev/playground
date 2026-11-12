@@ -6,6 +6,7 @@
   const cfg   = window.SQID_PLAYGROUND || { site : {}, page : '' };
   const root  = document.getElementById('sqid-panel');
   if(!root){ return; }
+  const cap   = (s) => String(s || '').replace(/\b[a-z]/g, c => c.toUpperCase());
   const esc   = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&' : '&amp;', '<' : '&lt;', '>' : '&gt;', '"' : '&quot;', "'" : '&#39;' }[c]));
   const t0    = performance.timeOrigin ? performance.now() : 0;
   const since = () => ((performance.now() - t0) / 1000).toFixed(2) + 's';
@@ -87,7 +88,7 @@
     engine.on('visitor.synced', e => { snap(); log('visitor.synced', S.visitor?.identified ? 'identified' : 'unknown'); });
     engine.on('visitor.identified', e => {
       snap(); S.traits = e.detail; S.identified = true; S.timeToId = e.detail?.time_to_id ?? null;
-      log('visitor.identified', `${e.detail?.name || e.detail?.email || '?'} · ${e.detail?.company || ''} · ${e.detail?.company_role || ''}${S.timeToId != null ? `  (${S.timeToId} ms)` : ''}`, 'pg-acc');
+      log('visitor.identified', `${cap(e.detail?.name) || e.detail?.email || '?'} · ${cap(e.detail?.company)} · ${cap(e.detail?.company_role)}${S.timeToId != null ? `  (${S.timeToId} ms)` : ''}`, 'pg-acc');
       done('arrive');
       window.SqidRecipes && window.SqidRecipes.apply(e.detail);
       loadRecord(); render();
@@ -115,12 +116,13 @@
   const A = {
     tab(name){ S.tab = name; store.set('tab', name); render(); },
     hide(){ S.hidden = true; store.set('hidden', true); document.body.classList.add('pg-panel-hidden'); mountShow(); },
-    async again(){
-      // A new visitor: ask the SDK to drop the identity (a new user_id follows), then reload.
-      try{ if(window.squid?.anonymouse){ await window.squid.anonymouse(); } }catch(error){ /* already anonymous */ }
+    again(){
+      // Replay the reveal: the page loads as a stranger and Sqid resolves the person again. The
+      // Sandbox pins one person to this device (a new visitor id gets the same person back), so a
+      // different person needs a private window or another device until the SDK has a reset call.
       S.log = []; store.sset('log', []); recordFor = null;
       sessionStorage.removeItem('rc.exit');
-      setTimeout(() => location.reload(), 300);
+      location.reload();
     },
     toggleRecipe(key){ window.SqidRecipes.toggle(key); window.SqidRecipes.apply(S.traits); render(); },
     showCode(key){ S.code = S.code === key ? null : key; render(); },
@@ -183,7 +185,7 @@
     let v = S.visitor, tr = S.traits;
     let anon = `<div class="who anon"><span class="k">Anonymous</span><span class="n">Visitor ${esc(String(v?.meta?.user_id || '').slice(0, 6) || '…')}…</span><span class="m">${esc(deviceLine())}</span></div>`;
     let known = S.identified
-      ? `<div class="who known"><span class="k">Identified${S.timeToId != null ? ` in ${(S.timeToId / 1000).toFixed(2)} s` : ''}</span><span class="n">${esc(tr?.name || tr?.email || '')}</span><span class="m">${esc([tr?.company_role, tr?.company].filter(Boolean).join(' · '))}</span></div>`
+      ? `<div class="who known"><span class="k">Identified${S.timeToId != null ? ` in ${(S.timeToId / 1000).toFixed(2)} s` : ''}</span><span class="n">${esc(cap(tr?.name) || tr?.email || '')}</span><span class="m">${esc([cap(tr?.company_role), cap(tr?.company)].filter(Boolean).join(' · '))}</span></div>`
       : S.identified === false
         ? `<div class="who anon"><span class="k">Still anonymous</span><span class="n">Sqid could not identify this visitor</span><span class="m">that happens on real sites too</span></div>`
         : `<div class="who anon"><span class="k">Resolving…</span><span class="n">Sqid is looking</span><span class="m">${S.connected ? 'connected, waiting for the answer' : 'connecting'}</span></div>`;
@@ -230,9 +232,9 @@
       <div>
         <span class="pg-label">WHO YOU ARE</span>
         <div class="pg-card hi" style="margin-top:8px">
-          <div class="pg-row"><div class="grow"><div><b>${esc(tr?.name || (S.identified === false ? 'Unknown visitor' : 'Resolving…'))}</b></div><div class="pg-muted" style="font-size:12px">${esc(tr ? [tr.company_role, tr.company, tr.email].filter(Boolean).join(' · ') : 'the Sandbox gives every new visitor one made-up person')}</div></div><button class="pg-btn" data-act="again">Be someone else</button></div>
+          <div class="pg-row"><div class="grow"><div><b>${esc(cap(tr?.name) || (S.identified === false ? 'Unknown visitor' : 'Resolving…'))}</b></div><div class="pg-muted" style="font-size:12px">${esc(tr ? [cap(tr.company_role), cap(tr.company), tr.email].filter(Boolean).join(' · ') : 'the Sandbox gives every new visitor one made-up person')}</div></div><button class="pg-btn" data-act="again">Watch it again</button></div>
         </div>
-        <p class="pg-p" style="font-size:12px;margin-top:8px">Sandbox test people, like Stripe test cards. Real sites resolve real people; the Sandbox hands out these 50 and never spends a credit.</p>
+        <p class="pg-p" style="font-size:12px;margin-top:8px">Sandbox test people, like Stripe test cards. Real sites resolve real people; the Sandbox hands out one of fifty and never spends a credit. This device keeps its person; a private window or another device gets a different one.</p>
       </div>
       <div>
         <span class="pg-label">THINGS TO TRY</span>
@@ -254,7 +256,7 @@
       ${open ? `<div>
         <div class="pg-row"><span class="pg-label">${esc(R.all[open].title.toUpperCase())}</span><a href="${R.all[open].docs}" target="_blank" rel="noopener" style="margin-left:auto;font-size:12px">Docs</a><button class="pg-btn" data-copy="${open}">Copy</button></div>
         <pre class="pg-mono" style="margin-top:8px">${esc(R.all[open].code)}</pre>
-        <span class="pg-p" style="font-size:12px;display:block;margin-top:6px">${R.all[open].locked ? 'Sandbox sites never receive moments. Add a card and put Sqid on a real site to see this one fire.' : S.traits ? `Running with ${esc(S.traits.name || S.traits.email)}'s profile. Click "Be someone else" in Scenarios to see it change.` : 'Waiting for an identified visitor.'}</span>
+        <span class="pg-p" style="font-size:12px;display:block;margin-top:6px">${R.all[open].locked ? 'Sandbox sites never receive moments. Add a card and put Sqid on a real site to see this one fire.' : S.traits ? `Running with ${esc(cap(S.traits.name) || S.traits.email)}'s profile. Click "Be someone else" in Scenarios to see it change.` : 'Waiting for an identified visitor.'}</span>
       </div>` : '<span class="pg-muted">Click a recipe to see its code.</span>'}`;
   }
 
@@ -272,7 +274,7 @@
         <span class="pg-p" style="font-size:12px;display:block;margin-top:6px">Any https endpoint works, a request catcher included. Identified visitors on this site are delivered there as the record below.</span>
       </div>
       <div>
-        <div class="pg-row"><span class="pg-label">THIS VISITOR'S RECORD</span><span class="pg-mono pg-acc" style="font-size:11px">${rec ? 'GET /visitors/' + esc(String(S.visitor?.meta?.user_id || '').slice(0, 6)) + '…' : ''}</span>${json ? `<button class="pg-btn" style="margin-left:auto" data-copytext="record">Copy JSON</button>` : ''}</div>
+        <div class="pg-row"><span class="pg-label">THIS VISITOR'S RECORD</span><span class="pg-mono pg-acc" style="font-size:11px">${rec ? 'profile ' + esc(String(S.visitor?.meta?.user_id || '').slice(0, 8)) + '…' : ''}</span>${json ? `<button class="pg-btn" style="margin-left:auto" data-copytext="record">Copy JSON</button>` : ''}</div>
         ${json ? `<pre class="pg-mono" style="margin-top:8px;max-height:360px;overflow:auto" id="pg-record">${esc(json)}</pre>` : `<span class="pg-p" style="font-size:12px;display:block;margin-top:8px">${S.recordErr ? `Could not read the record: ${esc(S.recordErr)}` : S.identified ? 'Loading from the visitor API…' : 'Appears once this visitor is identified. It is the same record a webhook delivers.'}</span>`}
         <div class="pg-row" style="margin-top:8px"><button class="pg-btn" data-act="sample">Show a webhook sample</button><a href="https://docs.sqid.dev/sdk/events" target="_blank" rel="noopener" style="margin-left:auto;font-size:12px">All the fields</a></div>
         ${S.showSample ? `<pre class="pg-mono" style="margin-top:8px;max-height:280px;overflow:auto">${esc(JSON.stringify(S.sample, null, 2))}</pre>` : ''}

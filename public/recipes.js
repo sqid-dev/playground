@@ -4,8 +4,9 @@
 (function(){
   'use strict';
   const page = () => document.body.dataset.page;
-  const first = (v) => v?.firstName || (v?.name || '').split(' ')[0] || null;
-  const company = (v) => v?.company ? v.company.replace(/\b\w/g, c => c.toUpperCase()) : null;
+  const cap = (s) => String(s || '').replace(/\b[a-z]/g, c => c.toUpperCase());
+  const first = (v) => cap(v?.firstName || (v?.name || '').split(' ')[0] || '') || null;
+  const company = (v) => v?.company ? cap(v.company) : null;
   const sizeOf = (v) => v?.company_size || v?.job_company_size || null;
 
   const RECIPES = {
@@ -92,7 +93,7 @@ engine.on('visitor.identified', (e) => {
         let form = document.getElementById('demo-form'); if(!form){ return; }
         for(let [k, val] of [['name', v?.name], ['email', v?.email], ['company', company(v)]]){
           let input = form.elements[k]; if(!input){ continue; }
-          if(v && on && val && !input.dataset.typed){ input.value = val; input.classList.add('prefilled'); }
+          if(v && on && val && !input.dataset.typed){ input.value = k === 'email' ? val : cap(val); input.classList.add('prefilled'); }
           else if(!on && input.classList.contains('prefilled')){ input.value = ''; input.classList.remove('prefilled'); }
         }
         form.addEventListener('input', e => { e.target.dataset.typed = '1'; e.target.classList.remove('prefilled'); }, { once : false });

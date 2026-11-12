@@ -23,7 +23,7 @@ website to paste the snippet into.
 
 | Tab | What it does |
 | --- | --- |
-| **Start** | The five-step checklist (signed in, site, script, webhook, stream live) and the reveal: anonymous visitor, then the person, with the time it took. "Watch it again" makes you a new visitor. |
+| **Start** | The five-step checklist (signed in, site, script, webhook, stream live) and the reveal: anonymous visitor, then the person, with the time it took. "Watch it again" replays it. (The Sandbox pins one person to a device; a private window gets another.) |
 | **Live** | Every SDK event and page action, newest first: connected, `visitor.identified`, clicks, variant switches, form stalls. |
 | **Scenarios** | Who you are right now, and a checklist of things to try on the site: switch sizes without buying, sign in and call `squid.identify()`, stall on the form, sit on the cart, return to pricing, labelled clicks, exit intent. |
 | **Recipes** | The docs recipes, live on this site: DOM personalisation, pricing personalisation, chat, form prefill, exit intent, analytics, the service-provider pattern against a built-in mock database. Toggle one and the page changes; the code shown is the code from the docs. |

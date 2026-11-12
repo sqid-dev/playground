@@ -7,9 +7,10 @@ import os from 'node:os';
 import { api } from '@sqid-dev/sqid/src/api.js';
 import { readCredentials, writeCredentials } from '@sqid-dev/sqid/src/credentials.js';
 import { siteRow, snippetFor, toOrigins } from '@sqid-dev/sqid/src/project.js';
-import { sdkKeyFor, publicApi } from '@sqid-dev/sqid/src/sdkkey.js';
 import { EVENTS } from '@sqid-dev/sqid/src/commands/webhook.js';
 import { loginLoopback, userinfo } from '@sqid-dev/sqid/src/oauth.js';
+
+const base = (site, ev) => `${ev.v2 ? '/api/v2' : '/api'}/projects/${site.id}`;
 
 // Sites with their allowed origins (the CLI's siteRow leaves origins out).
 async function listSites(flags){
@@ -88,9 +89,7 @@ export class Bridge {
 
   async addWebhook(url, eventKey = 'identification'){
     let ev = EVENTS[eventKey] || EVENTS.identification;
-    let base = ev.v2 ? `/api/sqid/sdks/${this.site.id}/v2` : `/api/sdks/${this.site.id}`;
-    let body = ev.v2 ? { url, namespace : ev.namespace, name : 'Playground' } : { url, namespace : ev.namespace, name : 'Playground' };
-    return api('POST', `${base}/webhook`, { flags : this.flags, body });
+    return api('POST', `${base(this.site, ev)}/webhook`, { flags : this.flags, body : { url, namespace : ev.namespace, name : 'Playground' } });
   }
 
   async testWebhook(id){
@@ -98,29 +97,29 @@ export class Bridge {
     let w = hooks.find(h => h.id === id);
     if(!w){ throw Object.assign(new Error('No such webhook'), { status : 404 }); }
     let ev = Object.values(EVENTS).find(e => e.namespace === w.event) || EVENTS.identification;
-    let base = ev.v2 ? `/api/sqid/sdks/${this.site.id}/v2` : `/api/sdks/${this.site.id}`;
-    return api('POST', `${base}/webhook/test`, { flags : this.flags, body : { webhook_id : id } });
+    return api('POST', `${base(this.site, ev)}/webhook/test`, { flags : this.flags, body : { webhook_id : id } });
   }
 
   // A sample of the record a webhook delivers (nothing is sent).
   async sample(eventKey = 'identification'){
     let ev = EVENTS[eventKey] || EVENTS.identification;
-    let base = ev.v2 ? `/api/sqid/sdks/${this.site.id}/v2` : `/api/sdks/${this.site.id}`;
-    return api('POST', `${base}/webhook/preview`, { flags : this.flags, body : { namespace : ev.namespace } });
+    let r = await api('POST', `${base(this.site, ev)}/webhook/preview`, { flags : this.flags, body : { namespace : ev.namespace } });
+    return r?.payload || r;
   }
 
-  // The live visitor's full record from the public visitor API, with a key bound to the site.
+  // The live visitor's full profile, the same record the console's Identities page shows (the
+  // public visitor API does not index Sandbox people, so this goes through the console route).
   async visitor(id){
-    let key = await sdkKeyFor(this.site, this.flags);
-    let r = await publicApi('GET', `/visitors/${encodeURIComponent(id)}`, { key });
-    if(!r.ok){ throw Object.assign(new Error(r.data?.message || r.data?.error || `visitor lookup failed (${r.status})`), { status : r.status }); }
-    return r.data;
+    if(!/^[a-f0-9]{24}$/i.test(String(id))){ throw Object.assign(new Error('not a visitor id'), { status : 400 }); }
+    let r = await api('GET', `/api/projects/${this.site.id}/profiles/${id}`, { flags : this.flags });
+    if(!r){ throw Object.assign(new Error('not found'), { status : 404 }); }
+    let { seen_by, pinned_by, __v, ...rest } = r;
+    return rest;
   }
 
   async visitorEvents(id){
-    let key = await sdkKeyFor(this.site, this.flags);
-    let r = await publicApi('GET', `/visitors/${encodeURIComponent(id)}/key-events`, { key });
-    return r.ok ? r.data : { error : r.data?.error || r.status };
+    if(!/^[a-f0-9]{24}$/i.test(String(id))){ return { error : 'not a visitor id' }; }
+    return api('GET', `/api/projects/${this.site.id}/profiles/${id}/key-events`, { flags : this.flags }).catch(e => ({ error : e.message }));
   }
 
   // Go live: a real site on the account, with its snippet.

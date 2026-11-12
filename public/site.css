@@ -20,6 +20,7 @@ body.pg-panel-hidden .pg-panel{display:none}
 .site-nav .brand{font-weight:700;font-size:19px;letter-spacing:-.02em;color:var(--ink)}
 .site-nav nav{display:flex;gap:22px}
 .site-nav nav a,.nav-right a{color:var(--ink)}
+.nav-right a.btn-dark{color:#fff}
 .site-nav nav a.on{border-bottom:2px solid var(--ink);padding:20px 0}
 .nav-right{margin-left:auto;display:flex;align-items:center;gap:18px}
 .cart-link span{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--bg-2);font-size:12px;text-align:center}
