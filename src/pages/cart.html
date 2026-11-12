@@ -1,0 +1,16 @@
+<section class="wrap two-col">
+  <div>
+    <h1>Your cart</h1>
+    <div class="cart-lines" id="cart-lines">
+      <div class="cart-line"><strong>Driftwood Rise</strong><span>60 in · Walnut · Qty 1</span><em>$749</em></div>
+    </div>
+    <p class="hint">Sit here and do nothing for a while. On a real site with Signals on, that is a cart stall. The discount box below is the discount-codes signal.</p>
+  </div>
+  <form class="card-form" action="/cart/checkout" method="post" id="checkout-form">
+    <label>Discount code<input name="code" type="text" placeholder="Try SAVE10 (it will not work)" autocomplete="off"></label>
+    <button type="button" class="btn btn-ghost" id="apply-code" data-sqid-label="apply_discount" data-sqid-type="key_event">Apply</button>
+    <p class="form-error hidden" id="code-error">That code is not valid.</p>
+    <div class="total"><span>Total</span><strong>$749</strong></div>
+    <button type="submit" class="btn btn-dark btn-lg" data-sqid-label="checkout" data-sqid-type="conversion">Place order</button>
+  </form>
+</section>

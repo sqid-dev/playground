@@ -1,0 +1,19 @@
+<section class="wrap two-col">
+  <div>
+    <h1>Book a demo</h1>
+    <p>A 20 minute walkthrough with a desk specialist. If Sqid knows you, the form is already filled in.</p>
+    <ul class="plain">
+      <li>Prefilled by the Form prefill recipe when it is on</li>
+      <li>Fill two fields, then stop for a minute: that is a form stall</li>
+      <li>Send it: a conversion key event</li>
+    </ul>
+  </div>
+  <form class="card-form" action="/demo" method="post" id="demo-form">
+    <label>Name<input name="name" type="text" autocomplete="off" required></label>
+    <label>Work email<input name="email" type="email" autocomplete="off" required></label>
+    <label>Company<input name="company" type="text" autocomplete="off"></label>
+    <label>How many desks?<input name="desks" type="text" placeholder="e.g. 80" autocomplete="off"></label>
+    <label>When works?<input name="when" type="text" placeholder="Next week, mornings" autocomplete="off"></label>
+    <button type="submit" class="btn btn-dark btn-lg" data-sqid-label="request_demo" data-sqid-type="conversion">Request a demo</button>
+  </form>
+</section>

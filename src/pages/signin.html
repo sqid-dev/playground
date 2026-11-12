@@ -1,0 +1,13 @@
+<section class="wrap two-col">
+  <div>
+    <h1>Sign in</h1>
+    <p>When someone signs in, your site already knows who they are. Tell Sqid with one call and the visitor is bound to that identity from now on.</p>
+    <pre class="code">await squid.identify({ email });</pre>
+    <p class="hint">Any email works here. Use one of the Sandbox's test people (the panel's Scenarios tab lists who you are) or your own.</p>
+  </div>
+  <form class="card-form" action="/signin" method="post" id="signin-form">
+    <label>Email<input name="email" type="email" autocomplete="off" required placeholder="you@company.com"></label>
+    <label>Password<input name="password" type="password" autocomplete="off" placeholder="anything"></label>
+    <button type="submit" class="btn btn-dark btn-lg" data-sqid-label="sign_in" data-sqid-type="conversion">Sign in</button>
+  </form>
+</section>

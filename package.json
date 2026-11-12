@@ -1,0 +1,42 @@
+{
+  "name": "@sqid-dev/playground",
+  "version": "0.1.0",
+  "description": "A real-looking website (Driftwood, a desk company) with a Sqid panel docked on the side: watch a visitor get identified, try the scenarios and recipes, see the record that goes out, then go live on your own site.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "sqid-playground": "bin/sqid-playground.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "public",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "start": "node bin/sqid-playground.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@sqid-dev/sqid": "^0.1.0",
+    "express": "^4.21.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sqid-dev/playground.git"
+  },
+  "homepage": "https://docs.sqid.dev",
+  "keywords": [
+    "sqid",
+    "visitor identification",
+    "playground",
+    "sandbox",
+    "demo"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
