@@ -12,53 +12,88 @@ import { loginLoopback, userinfo } from '@sqid-dev/sqid/src/oauth.js';
 
 const base = (site, ev) => `${ev.v2 ? '/api/v2' : '/api'}/projects/${site.id}`;
 
-// Sites with their allowed origins (the CLI's siteRow leaves origins out).
-async function listSites(flags){
-  let rows = await api('GET', '/api/sqid/projects', { flags });
-  return (rows || []).map(p => ({ ...siteRow(p), origins : (p.site_origins || []).map(String) }));
+// A site's allowed origins live in its jwt (payload.site and payload.app, comma-separated): that is
+// how the console's own edit page reads them. Neither GET /api/sqid/projects nor GET /api/projects/:id
+// returns a site_origins field, so reading one gives an empty list, and writing that back wipes
+// the origins set in the console.
+export function originsOf(project){
+  let token = String(project?.jwt || '').split('.')[1];
+  if(!token){ return null; }
+  try{
+    let payload = JSON.parse(Buffer.from(token.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+    const list = (v) => String(v || '').split(',').map(s => s.trim()).filter(Boolean);
+    return { site : list(payload.site), app : list(payload.app) };
+  }catch(error){ return null; }
+}
+
+// Add `origin` to both lists when missing; never removes or reorders anything.
+// Returns null when nothing needs to change.
+export function withOrigin(current, origin){
+  let site = [...(current?.site || [])], app = [...(current?.app || [])];
+  if(site.includes(origin) && app.includes(origin)){ return null; }
+  if(!site.includes(origin)){ site.push(origin); }
+  if(!app.includes(origin)){ app.push(origin); }
+  return { site, app };
+}
+
+// Sites, with the origins their jwt allows (the CLI's siteRow leaves origins out).
+async function listSites(flags, call = api){
+  let rows = await call('GET', '/api/sqid/projects', { flags });
+  return (rows || []).map(p => ({ ...siteRow(p), origins : originsOf(p)?.site || [] }));
 }
 
 export class Bridge {
-  constructor(flags = {}){
+  // `deps` swaps the API and credential reads in tests; normally the CLI's own.
+  constructor(flags = {}, deps = {}){
     this.flags = flags;
+    this.api   = deps.api || api;
+    this.readCredentials = deps.readCredentials || readCredentials;
     this.site  = null;
     this.me    = null;
   }
 
   // Sign in if needed, pick the site, allow this origin on it.
   async prepare(origin){
-    let creds = await readCredentials();
+    let creds = await this.readCredentials();
     if(!creds?.access_token){
       process.stdout.write('  Not signed in to Sqid. Opening your browser to sign in...\n');
       let tokens = await loginLoopback({ onUrl : (url, { opened }) => process.stdout.write(opened ? `  If it did not open: ${url}\n` : `  Open this link to sign in: ${url}\n`) });
       let info = await userinfo(tokens.access_token).catch(() => null);
       await writeCredentials({ ...tokens, email : info?.email, user_id : info?.sub || info?.user_id, issued_on : os.hostname(), issued_at : new Date().toISOString() });
-      creds = await readCredentials();
+      creds = await this.readCredentials();
     }
-    this.me = await api('GET', '/api/sqid/me', { flags : this.flags });
+    this.me = await this.api('GET', '/api/sqid/me', { flags : this.flags });
 
-    let sites = await listSites(this.flags);
+    let sites = await listSites(this.flags, this.api);
     let site  = this.flags.site ? sites.find(s => s.id === this.flags.site || s.name === this.flags.site) : sites.find(s => s.sandbox);
     if(this.flags.site && !site){ throw Object.assign(new Error(`No site "${this.flags.site}" on this account.`), { exit : 2 }); }
     if(!site){
       // The account has no Sandbox (deleted, or an older account): make it again.
-      let made = await api('POST', '/api/sqid/sandbox', { flags : this.flags, body : {} });
-      sites = await listSites(this.flags);
+      let made = await this.api('POST', '/api/sqid/sandbox', { flags : this.flags, body : {} });
+      sites = await listSites(this.flags, this.api);
       site  = sites.find(s => s.id === String(made?.sdk_id)) || sites.find(s => s.sandbox);
       if(!site){ throw new Error('Sqid did not return a Sandbox site.'); }
     }
     this.site = site;
 
     // Allow this origin on the site (the snippet loads nothing from an origin the site does not list).
-    let originAdded = false;
-    let current = (site.origins || []).map(String);
-    if(!current.includes(origin)){
-      let next = toOrigins([...current, origin].join(','));
-      await api('PATCH', `/api/projects/${site.id}`, { flags : this.flags, body : { name : site.name, site_origins : next, product_origins : next } });
-      this.site = { ...site, origins : next };
-      originAdded = true;
+    // Read the current lists from the site itself and only add; if they cannot be read, write nothing.
+    let originAdded = false, originError = null;
+    let current = null;
+    try{ current = originsOf(await this.api('GET', `/api/projects/${site.id}`, { flags : this.flags })); }
+    catch(error){ originError = error.message; }
+    if(!current){
+      originError = originError || 'could not read the site\'s allowed origins';
+    }else{
+      let next = withOrigin(current, origin);
+      if(next){
+        await this.api('PATCH', `/api/projects/${site.id}`, { flags : this.flags, body : { name : site.name, site_origins : next.site, product_origins : next.app } });
+        current = next;
+        originAdded = true;
+      }
+      this.site = { ...site, origins : current.site };
     }
-    return { email : this.me?.email || this.me?.user?.email || creds?.email || 'you', site : this.site, originAdded };
+    return { email : this.me?.email || this.me?.user?.email || creds?.email || 'you', site : this.site, originAdded, originError };
   }
 
   snippet(id = this.site.id){ return snippetFor(id); }
@@ -66,7 +101,7 @@ export class Bridge {
   // What the panel's Start tab needs, in one call.
   async state(){
     let [me, hooks] = await Promise.all([
-      api('GET', '/api/sqid/me', { flags : this.flags }).catch(() => this.me),
+      this.api('GET', '/api/sqid/me', { flags : this.flags }).catch(() => this.me),
       this.webhooks().catch(() => [])
     ]);
     this.me = me || this.me;
@@ -82,14 +117,14 @@ export class Bridge {
   }
 
   async webhooks(){
-    let r = await api('GET', `/api/sqid/sdks/${this.site.id}/webhooks`, { flags : this.flags });
+    let r = await this.api('GET', `/api/sqid/sdks/${this.site.id}/webhooks`, { flags : this.flags });
     let list = Array.isArray(r) ? r : r?.webhooks || [];
     return list.map(w => ({ id : String(w._id || w.id), url : w.url, event : w.namespace || w.event, enabled : w.enabled !== false, health : w.health || null, name : w.name || null }));
   }
 
   async addWebhook(url, eventKey = 'identification'){
     let ev = EVENTS[eventKey] || EVENTS.identification;
-    return api('POST', `${base(this.site, ev)}/webhook`, { flags : this.flags, body : { url, namespace : ev.namespace, name : 'Playground' } });
+    return this.api('POST', `${base(this.site, ev)}/webhook`, { flags : this.flags, body : { url, namespace : ev.namespace, name : 'Playground' } });
   }
 
   async testWebhook(id){
@@ -97,13 +132,13 @@ export class Bridge {
     let w = hooks.find(h => h.id === id);
     if(!w){ throw Object.assign(new Error('No such webhook'), { status : 404 }); }
     let ev = Object.values(EVENTS).find(e => e.namespace === w.event) || EVENTS.identification;
-    return api('POST', `${base(this.site, ev)}/webhook/test`, { flags : this.flags, body : { webhook_id : id } });
+    return this.api('POST', `${base(this.site, ev)}/webhook/test`, { flags : this.flags, body : { webhook_id : id } });
   }
 
   // A sample of the record a webhook delivers (nothing is sent).
   async sample(eventKey = 'identification'){
     let ev = EVENTS[eventKey] || EVENTS.identification;
-    let r = await api('POST', `${base(this.site, ev)}/webhook/preview`, { flags : this.flags, body : { namespace : ev.namespace } });
+    let r = await this.api('POST', `${base(this.site, ev)}/webhook/preview`, { flags : this.flags, body : { namespace : ev.namespace } });
     return r?.payload || r;
   }
 
@@ -111,7 +146,7 @@ export class Bridge {
   // public visitor API does not index Sandbox people, so this goes through the console route).
   async visitor(id){
     if(!/^[a-f0-9]{24}$/i.test(String(id))){ throw Object.assign(new Error('not a visitor id'), { status : 400 }); }
-    let r = await api('GET', `/api/projects/${this.site.id}/profiles/${id}`, { flags : this.flags });
+    let r = await this.api('GET', `/api/projects/${this.site.id}/profiles/${id}`, { flags : this.flags });
     if(!r){ throw Object.assign(new Error('not found'), { status : 404 }); }
     let { seen_by, pinned_by, __v, ...rest } = r;
     return rest;
@@ -119,24 +154,24 @@ export class Bridge {
 
   async visitorEvents(id){
     if(!/^[a-f0-9]{24}$/i.test(String(id))){ return { error : 'not a visitor id' }; }
-    return api('GET', `/api/projects/${this.site.id}/profiles/${id}/key-events`, { flags : this.flags }).catch(e => ({ error : e.message }));
+    return this.api('GET', `/api/projects/${this.site.id}/profiles/${id}/key_events`, { flags : this.flags }).catch(e => ({ error : e.message }));
   }
 
   // Go live: a real site on the account, with its snippet.
   async createSite({ name, url }){
     let origins = toOrigins(url);
     if(!origins.length){ throw Object.assign(new Error('Give the site\'s public URL, e.g. https://www.example.com'), { status : 400 }); }
-    let me = await api('GET', '/api/sqid/me', { flags : this.flags });
+    let me = await this.api('GET', '/api/sqid/me', { flags : this.flags });
     if(!me?.account?.hasSubscription){
-      try{ await api('POST', '/api/sqid/billing/start', { flags : this.flags, body : {} }); }catch(error){ /* the project route starts it too */ }
+      try{ await this.api('POST', '/api/sqid/billing/start', { flags : this.flags, body : {} }); }catch(error){ /* the project route starts it too */ }
     }
-    let sites = await listSites(this.flags);
+    let sites = await listSites(this.flags, this.api);
     let same  = sites.find(s => !s.sandbox && s.name?.toLowerCase() === String(name || '').toLowerCase());
     let site  = same;
     if(!site){
-      let created = await api('POST', '/api/projects', { flags : this.flags, body : { name : name || new URL(origins[0]).hostname, site_origins : origins, product_origins : origins, avatar_index : 1 } });
+      let created = await this.api('POST', '/api/projects', { flags : this.flags, body : { name : name || new URL(origins[0]).hostname, site_origins : origins, product_origins : origins, avatar_index : 1 } });
       let id = String(created?._id || created?.id || created?.sdk_id || '');
-      sites = await listSites(this.flags);
+      sites = await listSites(this.flags, this.api);
       site  = sites.find(s => s.id === id) || sites.find(s => !s.sandbox && s.origins?.includes(origins[0]));
     }
     if(!site){ throw new Error('Sqid did not return the new site.'); }
@@ -144,7 +179,7 @@ export class Bridge {
   }
 
   async siteStatus(id){
-    let sites = await listSites(this.flags);
+    let sites = await listSites(this.flags, this.api);
     let s = sites.find(x => x.id === id);
     return s ? { id : s.id, name : s.name, deployed : !!s.deployed, connected : !!s.connected } : null;
   }

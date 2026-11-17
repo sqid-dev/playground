@@ -53,7 +53,12 @@ export async function main(argv){
   let ready = await bridge.prepare(origin);   // signs in if needed, finds the Sandbox, allows the origin
   process.stdout.write(`  Signed in as ${ready.email}\n`);
   process.stdout.write(`  Site: ${ready.site.name} (${ready.site.id})${ready.site.sandbox ? ', Sandbox' : ''}\n`);
-  process.stdout.write(`  Origin ${origin} ${ready.originAdded ? 'allowed on the site' : 'already allowed'}\n`);
+  if(ready.originError){
+    process.stdout.write(`  Could not check the site's allowed origins (${ready.originError}). Nothing was changed.\n`);
+    process.stdout.write(`  If the panel says the SDK did not load, add ${origin} to the site in the console (SDKs, allowed origins).\n`);
+  }else{
+    process.stdout.write(`  Origin ${origin} ${ready.originAdded ? 'added to the site (its other origins are kept)' : 'already allowed'}\n`);
+  }
 
   let app = createApp(bridge);
   let server = createServer(app);
