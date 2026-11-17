@@ -1,6 +1,9 @@
-// The Sqid panel. Six tabs: Start, Live, Scenarios, Recipes, Delivery, Go live. It listens to
-// the real SDK on this page (window.squid), to the page (sqid:page events from site.js) and to
-// the local API (/_sqid/*). Nothing here is mocked: what it shows is what Sqid did.
+// The Sqid panel. The first screen is the reveal (an anonymous visitor becomes a person) with two
+// next steps: "Send this to my app" (webhooks) and "Put Sqid on my site" (a real site and its
+// snippet). Live events, things to try and the recipes sit behind Explore.
+//
+// It listens to the real SDK on this page (window.squid), to the page (sqid:page events from
+// site.js) and to the local API (/_sqid/*). Nothing here is mocked: what it shows is what Sqid did.
 (function(){
   'use strict';
   const cfg   = window.SQID_PLAYGROUND || { site : {}, page : '' };
@@ -12,24 +15,41 @@
   const since = () => ((performance.now() - t0) / 1000).toFixed(2) + 's';
   const store = {
     get(k, d){ try{ let v = JSON.parse(localStorage.getItem('sqid.playground.' + k)); return v == null ? d : v; }catch(error){ return d; } },
-    set(k, v){ localStorage.setItem('sqid.playground.' + k, JSON.stringify(v)); },
+    set(k, v){ try{ localStorage.setItem('sqid.playground.' + k, JSON.stringify(v)); }catch(error){ /* private mode */ } },
     sget(k, d){ try{ let v = JSON.parse(sessionStorage.getItem('sqid.playground.' + k)); return v == null ? d : v; }catch(error){ return d; } },
-    sset(k, v){ sessionStorage.setItem('sqid.playground.' + k, JSON.stringify(v)); }
+    sset(k, v){ try{ sessionStorage.setItem('sqid.playground.' + k, JSON.stringify(v)); }catch(error){ /* private mode */ } }
+  };
+  const VIEWS    = ['home', 'send', 'golive', 'explore'];
+  const EXPLORE  = { live : 'Live events', scenarios : 'Things to try', recipes : 'Recipes' };
+  const CONSOLE  = () => S.state?.console || 'https://app.sqid.dev';
+
+  // ---- svg bits -----------------------------------------------------------------------------------
+  const ICON = {
+    done : '<svg width="16" height="16" viewBox="0 0 20 20" role="img" aria-label="done"><circle cx="10" cy="10" r="9" fill="#22d3ee"></circle><path d="M6 10.5l2.5 2.5L14 7.5" stroke="#0b0b0d" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
+    now  : '<svg width="16" height="16" viewBox="0 0 20 20" role="img" aria-label="current"><circle cx="10" cy="10" r="8" stroke="#22d3ee" stroke-width="2" fill="none"></circle><circle cx="10" cy="10" r="3" fill="#22d3ee"></circle></svg>',
+    todo : '<svg width="16" height="16" viewBox="0 0 20 20" role="img" aria-label="pending"><circle cx="10" cy="10" r="8" stroke="#52525b" stroke-width="2" fill="none"></circle></svg>',
+    arrow: '<svg width="20" height="20" viewBox="0 0 22 22" role="img" aria-label="became"><path d="M3 11h14M12 6l5 5-5 5" stroke="#22d3ee" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
+    next : '<svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
   };
 
   // ---- state --------------------------------------------------------------------------------
   const S = {
-    tab       : store.get('tab', 'start'),
+    view      : VIEWS.includes(store.get('view', 'home')) ? store.get('view', 'home') : 'home',
+    explore   : EXPLORE[store.get('explore', 'live')] ? store.get('explore', 'live') : 'live',
     state     : null,          // /_sqid/state
     connected : false,
+    sdkFailed : false,
     visitor   : null,          // engine.visitor()
     traits    : null,          // visitor.identified detail
     identified: null,
     timeToId  : null,
     log       : store.sget('log', []),
     done      : store.get('done', {}),   // scenario id -> true
-    record    : null,          // last visitor record from the API
+    record    : null,          // the visitor's full record from the console
     recordErr : null,
+    showRecord: false,
+    details   : false,         // setup checklist open
+    note      : null,          // a message under "Be someone new"
     webhooks  : [],
     goLive    : store.get('golive', null),
     hidden    : store.get('hidden', false)
@@ -41,7 +61,7 @@
     S.log.unshift({ at : since(), page : cfg.path, kind, detail, cls : cls || 'pg-muted', t : Date.now() });
     S.log = S.log.slice(0, 80);
     store.sset('log', S.log);
-    if(S.tab === 'live' || S.tab === 'start' || S.tab === 'scenarios'){ render(); }
+    if(S.view === 'explore' || S.view === 'home'){ render(); }
   }
 
   // ---- scenarios ----------------------------------------------------------------------------
@@ -77,7 +97,7 @@
   // ---- the SDK --------------------------------------------------------------------------------
   function whenSquid(cb, tries = 200){
     if(window.squid && window.squid.engine){ return cb(window.squid); }
-    if(tries <= 0){ log('sdk', 'the SDK did not load: is this origin allowed on the site?', 'pg-yel'); return render(); }
+    if(tries <= 0){ S.sdkFailed = true; log('sdk', 'the SDK did not load: is this origin allowed on the site?', 'pg-yel'); return render(); }
     setTimeout(() => whenSquid(cb, tries - 1), 100);
   }
   whenSquid(squid => {
@@ -114,37 +134,65 @@
 
   // ---- actions ----------------------------------------------------------------------------------
   const A = {
-    tab(name){ S.tab = name; store.set('tab', name); render(); },
+    go(view){ S.view = VIEWS.includes(view) ? view : 'home'; store.set('view', S.view); render(); root.querySelector('.pg-body')?.scrollTo(0, 0); },
+    explore(key){ S.explore = key; store.set('explore', key); S.view = 'explore'; store.set('view', 'explore'); render(); },
     hide(){ S.hidden = true; store.set('hidden', true); document.body.classList.add('pg-panel-hidden'); mountShow(); },
     again(){
-      // Replay the reveal: the page loads as a stranger and Sqid resolves the person again. The
-      // Sandbox pins one person to this device (a new visitor id gets the same person back), so a
-      // different person needs a private window or another device until the SDK has a reset call.
+      // Replay the reveal: the page loads as a stranger and Sqid resolves the same person again.
       S.log = []; store.sset('log', []); recordFor = null;
-      sessionStorage.removeItem('rc.exit');
+      try{ sessionStorage.removeItem('rc.exit'); }catch(error){ /* ignore */ }
       location.reload();
+    },
+    async someoneNew(btn){
+      // Matching is by device, so a private window usually comes back as the same person. On a
+      // Sandbox, squid.anonymouse() forgets the made-up identity and the next load gets a new one.
+      let squid = window.squid;
+      if(!squid || typeof squid.anonymouse !== 'function'){
+        S.note = 'This version of the Sqid script cannot reset the visitor. In the console, open this person under Identities and use Forget identity, then reload.';
+        return render();
+      }
+      btn.disabled = true; btn.textContent = 'Resetting…';
+      try{
+        let r = await squid.anonymouse();
+        if(r && r.forgotten === false){
+          S.note = 'This is a real site, not the Sandbox: the visitor was marked inactive, but the same person will come back. A new test person is a Sandbox feature.';
+          btn.disabled = false; btn.textContent = 'Be someone new'; return render();
+        }
+        log('reset', 'squid.anonymouse(): identity forgotten, reloading', 'pg-acc');
+        S.log = []; store.sset('log', []); recordFor = null;
+        location.reload();
+      }catch(error){
+        S.note = `Could not reset (${error.message}). In the console, open this person under Identities and use Forget identity, then reload.`;
+        btn.disabled = false; btn.textContent = 'Be someone new'; render();
+      }
     },
     toggleRecipe(key){ window.SqidRecipes.toggle(key); window.SqidRecipes.apply(S.traits); render(); },
     showCode(key){ S.code = S.code === key ? null : key; render(); },
-    copy(text, btn){ navigator.clipboard?.writeText(text).then(() => { btn.textContent = 'Copied'; setTimeout(() => btn.textContent = 'Copy', 1200); }); },
+    copy(text, btn){ navigator.clipboard?.writeText(text).then(() => { let was = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => btn.textContent = was, 1200); }); },
     async addWebhook(form){
       let url = form.url.value.trim(); let btn = form.querySelector('button[type=submit]'); btn.disabled = true;
+      S.hookErr = null;
       try{ let r = await post('/_sqid/webhooks', { url, event : 'identification' }); S.webhooks = r.webhooks || []; log('webhook', `added ${url}`, 'pg-ok'); form.url.value = ''; }
-      catch(error){ log('webhook', `could not add: ${error.message}`, 'pg-yel'); }
+      catch(error){ S.hookErr = error.message; log('webhook', `could not add: ${error.message}`, 'pg-yel'); }
       btn.disabled = false; render();
     },
     async testWebhook(id, btn){
       btn.disabled = true; btn.textContent = 'Sending…';
-      try{ let r = await post(`/_sqid/webhooks/${id}/test`); log('webhook', `test delivery: ${r?.status || r?.response?.status || 'sent'}`, 'pg-ok'); S.lastTest = r; }
-      catch(error){ log('webhook', `test failed: ${error.message}`, 'pg-yel'); }
-      btn.disabled = false; btn.textContent = 'Send test'; render();
+      try{ let r = await post(`/_sqid/webhooks/${id}/test`); let status = r?.status || r?.response?.status || 'sent'; S.lastTest = { id, ok : true, text : `Test sent. Your app answered: ${status}.` }; log('webhook', `test delivery: ${status}`, 'pg-ok'); }
+      catch(error){ S.lastTest = { id, ok : false, text : `The test did not go through: ${error.message}` }; log('webhook', `test failed: ${error.message}`, 'pg-yel'); }
+      btn.disabled = false; btn.textContent = 'Send a test'; render();
     },
-    async sample(){ try{ S.sample = await get('/_sqid/sample'); }catch(error){ S.sample = { error : error.message }; } S.showSample = true; render(); },
+    async sample(){
+      if(S.showSample){ S.showSample = false; return render(); }
+      S.showSample = true; render();
+      if(!S.sample){ try{ S.sample = await get('/_sqid/sample'); }catch(error){ S.sample = { error : error.message }; } render(); }
+    },
     async createSite(form){
       let btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Creating…';
+      S.goLiveErr = null;
       try{ let r = await post('/_sqid/sites', { name : form.name.value.trim(), url : form.url.value.trim() }); S.goLive = { site : r.site, snippet : r.snippet, origins : r.origins, at : Date.now() }; store.set('golive', S.goLive); log('go live', `site "${r.site.name}" created`, 'pg-ok'); pollSite(); }
       catch(error){ S.goLiveErr = error.message; }
-      btn.disabled = false; btn.textContent = 'Create site and get my snippet'; render();
+      btn.disabled = false; btn.textContent = 'Create my site'; render();
     },
     forgetGoLive(){ S.goLive = null; store.set('golive', null); render(); }
   };
@@ -157,181 +205,202 @@
   }
   if(S.goLive && !S.goLive.status?.connected){ pollSite(); }
 
-  // ---- svg bits -----------------------------------------------------------------------------------
-  const ICON = {
-    done : '<svg width="18" height="18" viewBox="0 0 20 20" role="img" aria-label="done"><circle cx="10" cy="10" r="9" fill="#22d3ee"></circle><path d="M6 10.5l2.5 2.5L14 7.5" stroke="#0b0b0d" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
-    now  : '<svg width="18" height="18" viewBox="0 0 20 20" role="img" aria-label="current"><circle cx="10" cy="10" r="8" stroke="#22d3ee" stroke-width="2" fill="none"></circle><circle cx="10" cy="10" r="3" fill="#22d3ee"></circle></svg>',
-    todo : '<svg width="18" height="18" viewBox="0 0 20 20" role="img" aria-label="pending"><circle cx="10" cy="10" r="8" stroke="#52525b" stroke-width="2" fill="none"></circle></svg>',
-    arrow: '<svg width="20" height="20" viewBox="0 0 22 22" role="img" aria-label="became"><path d="M3 11h14M12 6l5 5-5 5" stroke="#22d3ee" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
-  };
-
   // ---- render -------------------------------------------------------------------------------------
   function render(){
     if(S.hidden){ return; }
-    let st = S.state;
+    // Keep what someone is typing: renders happen on every SDK or page event.
+    let typed = [...root.querySelectorAll('input[name]')].map(i => [i.closest('form')?.dataset.form + ':' + i.name, i.value, document.activeElement === i]);
+    let body = ({ home : viewHome, send : viewSend, golive : viewGoLive, explore : viewExplore }[S.view] || viewHome)(S.state);
     root.innerHTML = `
       <div class="pg-top">
-        <span class="dot" aria-hidden="true"></span><span class="name">SQID ${cfg.site.sandbox ? 'SANDBOX' : 'SITE'}</span>
-        <span class="site" title="${esc(cfg.site.id)}">${esc(cfg.site.name || '')}</span>
-        <span class="conn ${S.connected ? 'on' : ''}"><i></i>${S.connected ? 'Connected' : 'Connecting'}</span>
-        <button class="pg-btn" data-act="hide" title="Hide the panel">Hide</button>
+        <span class="dot" aria-hidden="true"></span><span class="name">Sqid</span>
+        <span class="site" title="${esc(cfg.site.id)}">${cfg.site.sandbox ? 'Sandbox' : esc(cfg.site.name || '')}</span>
+        <span class="conn ${S.connected ? 'on' : ''}" title="${S.connected ? 'Connected' : 'Connecting'}"><i></i><span class="lbl">${S.connected ? 'Connected' : 'Connecting'}</span></span>
+        <button class="pg-btn ghost ${S.view === 'explore' ? 'on' : ''}" data-act="explore" aria-pressed="${S.view === 'explore'}">Explore</button>
+        <button class="pg-btn ghost" data-act="hide" title="Hide the panel">Hide</button>
       </div>
-      <div class="pg-tabs" role="tablist">${['start', 'live', 'scenarios', 'recipes', 'delivery', 'golive'].map(k => `<button role="tab" aria-selected="${S.tab === k}" data-tab="${k}">${{ start : 'Start', live : 'Live', scenarios : 'Scenarios', recipes : 'Recipes', delivery : 'Delivery', golive : 'Go live' }[k]}</button>`).join('')}</div>
-      <div class="pg-body">${({ start : tabStart, live : tabLive, scenarios : tabScenarios, recipes : tabRecipes, delivery : tabDelivery, golive : tabGoLive }[S.tab] || tabStart)(st)}</div>`;
+      <div class="pg-body">${S.view !== 'home' ? `<button class="pg-back" data-go="home">&larr; Back</button>` : ''}${body}</div>`;
+    for(let [key, value, focused] of typed){
+      let [form, name] = key.split(':');
+      let el = root.querySelector(`form[data-form="${form}"] input[name="${name}"]`);
+      if(el){ el.value = value; if(focused){ el.focus(); } }
+    }
     wire();
+  }
+
+  // One line for the five setup checks; the list is behind "Details".
+  function status(st){
+    let hooks = S.webhooks || [];
+    let steps = [
+      { t : 'Signed in to Sqid', s : st?.email ? `${st.email}${st.plan?.has ? ` (${st.plan.name || 'Developer'} plan)` : ''}` : st?.error || 'checking…', ok : !!st?.email },
+      { t : `${cfg.site.sandbox ? 'Sandbox site' : 'Site'} ready`, s : st?.site ? `${st.site.name}, ${location.origin} allowed` : '…', ok : !!st?.site },
+      { t : 'Sqid script on this page', s : S.sdkFailed ? 'It did not load. Add this address to the site\'s allowed origins in the console.' : S.connected ? 'Loaded and connected.' : 'Loading…', ok : S.connected },
+      { t : 'Somewhere to send records', s : hooks.length ? `${hooks.length} web address${hooks.length > 1 ? 'es' : ''} (webhooks)` : 'None yet. Optional: "Send this to my app".', ok : hooks.length > 0, optional : true },
+      { t : 'A visitor identified', s : S.identified ? 'Yes, on this page.' : 'Happens on the first identification.', ok : !!S.identified }
+    ];
+    let line, cls;
+    if(st?.error){ line = 'Not signed in to Sqid. Restart the playground to sign in.'; cls = 'warn'; }
+    else if(S.sdkFailed){ line = 'The Sqid script did not load on this page.'; cls = 'warn'; }
+    else if(!S.connected){ line = 'Connecting to Sqid…'; cls = ''; }
+    else if(S.identified){ line = `Working. ${cfg.site.sandbox ? 'Test site, no credits used.' : ''}`; cls = 'ok'; }
+    else { line = 'Connected. Waiting for the answer…'; cls = ''; }
+    return `
+      <div class="pg-status ${cls}">
+        <i aria-hidden="true"></i><span class="txt">${esc(line)}</span>
+        <button class="pg-link" data-act="details" aria-expanded="${S.details}">${S.details ? 'Hide details' : 'Details'}</button>
+      </div>
+      ${S.details ? `<ul class="pg-checks">${steps.map(x => `<li>${x.ok ? ICON.done : ICON.todo}<div><span class="t">${esc(x.t)}${x.optional ? ' <span class="pg-muted">(optional)</span>' : ''}</span><span class="s">${esc(x.s)}</span></div></li>`).join('')}</ul>` : ''}`;
   }
 
   function reveal(){
     let v = S.visitor, tr = S.traits;
-    let anon = `<div class="who anon"><span class="k">Anonymous</span><span class="n">Visitor ${esc(String(v?.meta?.user_id || '').slice(0, 6) || '…')}…</span><span class="m">${esc(deviceLine())}</span></div>`;
+    let anon = `<div class="who anon"><span class="k">Anonymous visitor</span><span class="n">No name yet</span><span class="m">${esc(deviceLine())}</span></div>`;
     let known = S.identified
-      ? `<div class="who known"><span class="k">Identified${S.timeToId != null ? ` in ${(S.timeToId / 1000).toFixed(2)} s` : ''}</span><span class="n">${esc(cap(tr?.name) || tr?.email || '')}</span><span class="m">${esc([cap(tr?.company_role), cap(tr?.company)].filter(Boolean).join(' · '))}</span></div>`
+      ? `<div class="who known"><span class="k">Identified</span><span class="n">${esc(cap(tr?.name) || tr?.email || '')}</span><span class="m">${esc(cap(tr?.company) || '')}</span></div>`
       : S.identified === false
-        ? `<div class="who anon"><span class="k">Still anonymous</span><span class="n">Sqid could not identify this visitor</span><span class="m">that happens on real sites too</span></div>`
-        : `<div class="who anon"><span class="k">Resolving…</span><span class="n">Sqid is looking</span><span class="m">${S.connected ? 'connected, waiting for the answer' : 'connecting'}</span></div>`;
+        ? `<div class="who anon"><span class="k">Still anonymous</span><span class="n">Not identified</span><span class="m">that happens on real sites too</span></div>`
+        : `<div class="who anon"><span class="k">Looking…</span><span class="n">Sqid is working</span><span class="m">${S.connected ? 'connected' : 'connecting'}</span></div>`;
     return `<div class="pg-reveal">${anon}${ICON.arrow}${known}</div>`;
   }
-  function deviceLine(){ let ua = navigator.userAgent; let dev = /Mobi/.test(ua) ? 'mobile' : 'desktop'; let ref = document.referrer ? new URL(document.referrer).hostname : 'direct'; return `${dev} · ${ref} · ${cfg.path}`; }
+  function deviceLine(){ let ua = navigator.userAgent; let dev = /Mobi/.test(ua) ? 'phone' : 'computer'; let ref = 'came in directly'; try{ if(document.referrer){ ref = `from ${new URL(document.referrer).hostname}`; } }catch(error){ /* ignore */ } return `${dev}, ${ref}`; }
 
-  function tabStart(st){
-    let hooks = S.webhooks || [];
-    let steps = [
-      { t : 'Signed in to Sqid', s : st?.email ? `${st.email}${st.plan?.has ? ` · ${st.plan.name || 'Developer'} plan` : ''}` : (st?.error ? st.error : 'checking…'), ok : !!st?.email },
-      { t : `${cfg.site.sandbox ? 'Sandbox' : 'Site'} provisioned`, s : st ? `${st.site.name} · ${location.origin} allowed` : '…', ok : !!st?.site },
-      { t : 'Script added to layout', s : S.connected ? 'This page loads it. Connected.' : 'This page loads it; waiting for the connection.', ok : S.connected },
-      { t : 'Webhook wired', s : hooks.length ? `${hooks.length} endpoint${hooks.length > 1 ? 's' : ''} on the site` : 'Where should identified visitors go? Add your endpoint in Delivery, or just watch the record there.', ok : hooks.length > 0, cta : hooks.length ? null : 'delivery' },
-      { t : 'Stream is live', s : S.identified ? 'A visitor was identified on this page.' : 'Confirmed on the first identification.', ok : !!S.identified }
-    ];
-    let firstTodo = steps.findIndex(x => !x.ok);
+  function viewHome(st){
+    let tr = S.traits;
+    let secs = S.timeToId != null ? (S.timeToId / 1000).toFixed(2) : null;
+    let headline = S.identified
+      ? `Sqid knew who this was${secs ? ` in ${secs} seconds` : ''}.`
+      : S.identified === false ? 'Sqid could not tell who this visitor is.' : 'A stranger just opened this page.';
+    let rows = S.identified ? [['Name', cap(tr?.name) || tr?.email], ['Company', cap(tr?.company)], ['Title', cap(tr?.company_role)]].filter(r => r[1]) : [];
+    let json = S.record ? JSON.stringify(S.record, null, 2) : null;
     return `
-      <h2 class="pg-h">Set up Sqid</h2>
-      <p class="pg-p">Five steps. The site on the left is your test site. Nothing here costs credits.</p>
-      <ol class="pg-steps">${steps.map((x, i) => `<li class="pg-step ${x.ok ? '' : i === firstTodo ? 'now' : 'todo'}">${x.ok ? ICON.done : i === firstTodo ? ICON.now : ICON.todo}<div class="body"><span class="t">${esc(x.t)}</span><span class="s">${esc(x.s)}</span>${!x.ok && x.cta ? `<div class="pg-row"><button class="pg-btn primary" data-tab="${x.cta}">Open Delivery</button></div>` : ''}</div></li>`).join('')}</ol>
-      <div class="pg-card">
-        <div class="pg-row"><span class="pg-label">THIS VISITOR</span><button class="pg-btn grow-0" style="margin-left:auto" data-act="again">Watch it again</button></div>
+      ${status(st)}
+      <div class="pg-card hi pg-hero">
+        <h2 class="pg-h">${esc(headline)}</h2>
         ${reveal()}
-        <span class="pg-p" style="font-size:12px">${S.identified ? 'The page loaded as a stranger. Sqid resolved the person and the headline changed. The full record is in Delivery.' : 'The page loaded as a stranger. When Sqid resolves the person, this flips and the headline on the left changes.'}</span>
+        ${rows.length ? `<dl class="pg-facts">${rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : `<p class="pg-p small">${S.identified === false ? 'No identity came back for this visitor.' : 'When Sqid works out who it is, their name, company and title appear here, and the site on the left changes its headline.'}</p>`}
+        ${S.identified ? `
+          <button class="pg-link" data-act="record" aria-expanded="${S.showRecord}">${S.showRecord ? 'Hide the full record' : 'See the full record'}</button>
+          ${S.showRecord ? (json
+            ? `<pre class="pg-mono pg-scroll" id="pg-record">${esc(json)}</pre><div class="pg-row"><button class="pg-btn" data-copytext="record">Copy</button><span class="pg-muted small">This is what "Send this to my app" delivers.</span></div>`
+            : `<p class="pg-p small">${S.recordErr ? `Could not read the record: ${esc(S.recordErr)}` : 'Loading…'}</p>`) : ''}` : ''}
+        <div class="pg-row pg-wrap">
+          <button class="pg-btn" data-act="someone-new">Be someone new</button>
+          <button class="pg-link" data-act="again">Replay</button>
+        </div>
+        ${S.note ? `<p class="pg-p small pg-yel">${esc(S.note)}</p>` : ''}
+        ${cfg.site.sandbox ? '<p class="pg-p small">This is your Sandbox: every visitor is one of fifty made-up test people, and nothing costs credits.</p>' : ''}
       </div>
-      <div class="pg-foot">
-        <span class="pg-label">SAME THING FROM A TERMINAL OR CLAUDE</span>
-        <pre class="pg-mono">npx -y @sqid-dev/playground
-<span class="pg-muted">/sqid:setup   in Claude Code</span></pre>
+      <div class="pg-next">
+        <button class="pg-cta" data-go="send"><span><b>Send this to my app</b><span>Get each identified visitor's record at a web address you choose.</span></span>${ICON.next}</button>
+        <button class="pg-cta" data-go="golive"><span><b>Put Sqid on my site</b><span>Create your site and copy one line of code into it.</span></span>${ICON.next}</button>
       </div>`;
   }
 
-  function tabLive(){
+  function viewSend(st){
+    let hooks = S.webhooks || [];
     return `
-      <div class="pg-row"><h2 class="pg-h">Live</h2><button class="pg-btn" style="margin-left:auto" data-act="clearlog">Clear</button></div>
-      <p class="pg-p">Everything the SDK and the page did, newest first. Survives navigation within this tab session.</p>
+      <h2 class="pg-h">Send this to my app</h2>
+      <p class="pg-p">Each time Sqid identifies a visitor, it sends their record to a web address in your app (a webhook). Any https address works, including a free request catcher if you just want to look.</p>
+      ${hooks.length ? `<ul class="pg-list">${hooks.map(h => `<li class="pg-item"><i class="pg-dot ${h.enabled ? 'on' : ''}" aria-hidden="true"></i><span class="pg-url" title="${esc(h.url)}">${esc(h.url)}</span><span class="r"><button class="pg-btn" data-test="${esc(h.id)}">Send a test</button></span></li>${S.lastTest?.id === h.id ? `<li class="pg-p small ${S.lastTest.ok ? 'pg-ok' : 'pg-yel'}">${esc(S.lastTest.text)}</li>` : ''}`).join('')}</ul>` : ''}
+      <form class="pg-form" data-form="webhook">
+        <label class="pg-muted small" for="pg-hook-url">${hooks.length ? 'Add another address' : 'Your app\'s address'}</label>
+        <div class="pg-row"><input class="pg-input" id="pg-hook-url" name="url" type="url" placeholder="https://your-app.com/api/sqid" required><button class="pg-btn primary" type="submit">Add</button></div>
+        ${S.hookErr ? `<span class="pg-yel small">${esc(S.hookErr)}</span>` : ''}
+      </form>
+      <div>
+        <button class="pg-link" data-act="sample" aria-expanded="${!!S.showSample}">${S.showSample ? 'Hide the example' : 'See an example of what gets sent'}</button>
+        ${S.showSample ? `<pre class="pg-mono pg-scroll" style="margin-top:8px">${S.sample ? esc(JSON.stringify(S.sample, null, 2)) : 'Loading…'}</pre>` : ''}
+      </div>
+      <p class="pg-p small">Sandbox records are marked <span class="pg-mono">"sandbox": true</span>. Moments (Signals) are only sent from a real site, never from the Sandbox. <a href="https://docs.sqid.dev/sdk/events" target="_blank" rel="noopener">All the fields</a></p>`;
+  }
+
+  function viewGoLive(st){
+    let g = S.goLive;
+    return `
+      <h2 class="pg-h">Put Sqid on my site</h2>
+      ${g ? `
+        <p class="pg-p">Your site <b class="pg-strong">${esc(g.site.name)}</b> is ready for ${esc(g.origins.join(', '))}. Paste this just before <span class="pg-mono">&lt;/head&gt;</span> on every page, publish, then open your site once.</p>
+        <pre class="pg-mono" id="pg-snippet">${esc(g.snippet)}</pre>
+        <div class="pg-row pg-wrap"><button class="pg-btn primary" data-copytext="snippet">Copy the code</button><span class="small" style="color:${g.status?.connected ? '#4ade80' : '#a1a1aa'}">${g.status?.connected ? 'Connected. Your site is live.' : g.status?.deployed ? 'Seen a page view, connecting…' : 'Waiting for the first visit…'}</span></div>
+        <div class="pg-row pg-wrap"><a href="${esc(CONSOLE())}" target="_blank" rel="noopener" class="small">Open the console</a><button class="pg-link" data-act="forget">Start over</button></div>`
+      : `
+        <p class="pg-p">Give your website's address. Sqid adds the site to your account and gives you one line of code to paste into it.</p>
+        <form class="pg-form" data-form="site">
+          <label class="pg-muted small">Website address<input class="pg-input" name="url" type="url" placeholder="https://www.yourcompany.com" required></label>
+          <label class="pg-muted small">Name (optional)<input class="pg-input" name="name" type="text" placeholder="Marketing site" maxlength="50"></label>
+          <button class="pg-btn primary big" type="submit">Create my site</button>
+          ${S.goLiveErr ? `<span class="pg-yel small">${esc(S.goLiveErr)}</span>` : ''}
+        </form>`}
+      <div class="pg-card">
+        <b>Paying for it</b>
+        <p class="pg-p small">The Sandbox is free. A real site uses prepaid credits on the Developer plan: $0.25 each. Add a card and you get 25 welcome credits. Nothing is charged unless you buy credits or turn on auto-reload. With no credits left, your site stops identifying new visitors until you add more.</p>
+        <div class="pg-row pg-wrap"><a class="pg-btn accent" href="${esc(CONSOLE())}/billing" target="_blank" rel="noopener">Add a card</a><a href="https://sqid.dev/pricing" target="_blank" rel="noopener" class="small">Pricing</a></div>
+      </div>
+      <button class="pg-link" data-act="more" aria-expanded="${!!S.showMore}">${S.showMore ? 'Hide other ways' : 'Other ways: from my code editor, or inside my product'}</button>
+      ${S.showMore ? `
+        <div class="pg-card">
+          <b>From my code editor</b>
+          <p class="pg-p small">Claude Code adds the code to your layout and writes the webhook handler for your framework.</p>
+          <pre class="pg-mono">claude mcp add --transport http sqid https://mcp.sqid.dev/mcp
+/sqid:setup</pre>
+          <pre class="pg-mono">npx -y @sqid-dev/sqid init</pre>
+        </div>
+        <div class="pg-card">
+          <b>Inside my product</b>
+          <p class="pg-p small">Identify visitors in your own app or on your customers' sites, with the visitor API and server-side enrichment. Reselling it is the OEM plan: OEM Launch is $675/month with 500 identifications/month included.</p>
+          <div class="pg-row pg-wrap"><a href="https://docs.sqid.dev/api-reference/overview" target="_blank" rel="noopener" class="small">API reference</a><a href="https://sqid.dev/#oem" target="_blank" rel="noopener" class="small">OEM plan</a></div>
+        </div>` : ''}`;
+  }
+
+  function viewExplore(){
+    let body = ({ live : exLive, scenarios : exScenarios, recipes : exRecipes }[S.explore] || exLive)();
+    return `
+      <div class="pg-seg" role="tablist">${Object.entries(EXPLORE).map(([k, t]) => `<button role="tab" aria-selected="${S.explore === k}" data-explore="${k}">${t}</button>`).join('')}</div>
+      ${body}`;
+  }
+
+  function exLive(){
+    return `
+      <div class="pg-row"><p class="pg-p grow">Everything the Sqid script and the page did, newest first.</p><button class="pg-btn" data-act="clearlog">Clear</button></div>
       <div class="pg-log">${S.log.length ? S.log.map(e => `<div class="ev"><span class="at">${esc(e.at)}</span><span><span class="k ${esc(e.cls)}">${esc(e.kind)}</span>  <span class="d">${esc(e.detail)}</span>${e.page && e.page !== cfg.path ? ` <span class="pg-muted">${esc(e.page)}</span>` : ''}</span></div>`).join('') : '<span class="pg-muted">Nothing yet.</span>'}</div>`;
   }
 
-  function tabScenarios(){
-    let tr = S.traits;
+  function exScenarios(){
     return `
-      <div>
-        <span class="pg-label">WHO YOU ARE</span>
-        <div class="pg-card hi" style="margin-top:8px">
-          <div class="pg-row"><div class="grow"><div><b>${esc(cap(tr?.name) || (S.identified === false ? 'Unknown visitor' : 'Resolving…'))}</b></div><div class="pg-muted" style="font-size:12px">${esc(tr ? [cap(tr.company_role), cap(tr.company), tr.email].filter(Boolean).join(' · ') : 'the Sandbox gives every new visitor one made-up person')}</div></div><button class="pg-btn" data-act="again">Watch it again</button></div>
-        </div>
-        <p class="pg-p" style="font-size:12px;margin-top:8px">Sandbox test people, like Stripe test cards. Real sites resolve real people; the Sandbox hands out one of fifty and never spends a credit. This device keeps its person; a private window or another device gets a different one.</p>
-      </div>
-      <div>
-        <span class="pg-label">THINGS TO TRY</span>
-        <ul class="pg-list" style="margin-top:8px">${SCENARIOS.map(s => { let on = s.where === cfg.path; return `<li class="pg-item ${on && !S.done[s.id] ? 'now' : ''}">${S.done[s.id] ? ICON.done : on ? ICON.now : ICON.todo}<span>${esc(s.t)}</span><span class="r">${S.done[s.id] ? 'done' : s.where ? (on ? '<span class="pg-acc">this page</span>' : `<a href="${s.where}">${esc(s.label)}</a>`) : esc(s.label)}</span></li>`; }).join('')}</ul>
-      </div>
+      <p class="pg-p">Things to do on the site on the left. Each one shows up under Live events as Sqid sees it.</p>
+      <ul class="pg-list">${SCENARIOS.map(s => { let on = s.where === cfg.path; return `<li class="pg-item ${on && !S.done[s.id] ? 'now' : ''}">${S.done[s.id] ? ICON.done : on ? ICON.now : ICON.todo}<span class="grow">${esc(s.t)}</span><span class="r">${S.done[s.id] ? 'done' : s.where ? (on ? '<span class="pg-acc">this page</span>' : `<a href="${s.where}">${esc(s.label)}</a>`) : esc(s.label)}</span></li>`; }).join('')}</ul>
       <div class="pg-card">
-        <span class="pg-label">WHAT THE SDK SAW HERE</span>
+        <span class="pg-label">ON THIS PAGE</span>
         <div class="pg-log">${S.log.filter(e => e.page === cfg.path).slice(0, 6).map(e => `<div class="ev"><span class="at">${esc(e.at)}</span><span><span class="k ${esc(e.cls)}">${esc(e.kind)}</span>  <span class="d">${esc(e.detail)}</span></span></div>`).join('') || '<span class="pg-muted">Nothing on this page yet.</span>'}</div>
-        <span class="pg-p" style="font-size:12px">On a real site with Signals on, these shapes become moments (choosing_options, form_stall, cart_stall, deliberation). The Sandbox shows the raw behaviour only.</span>
+        <p class="pg-p small">On a real site with Signals on, these become moments (choosing_options, form_stall, cart_stall, deliberation). The Sandbox never sends moments; it shows the raw behaviour only.</p>
       </div>`;
   }
 
-  function tabRecipes(){
+  function exRecipes(){
     let R = window.SqidRecipes, on = R.enabled();
     let open = S.code && R.all[S.code] ? S.code : null;
     return `
-      <p class="pg-p">Turn a recipe on and this site changes. Each one is the code from the docs, running against the live profile.</p>
-      <ul class="pg-list">${Object.entries(R.all).map(([k, r]) => `<li class="pg-item ${open === k ? 'now' : ''}" style="cursor:pointer" data-code="${k}"><button class="pg-toggle ${on.includes(k) && !r.locked ? 'on' : ''}" data-recipe="${k}" ${r.locked ? 'disabled' : ''} aria-label="toggle ${esc(r.title)}"><i></i></button><span>${esc(r.title)}</span><span class="r ${r.locked ? 'pg-yel' : ''}">${esc(r.where)}</span></li>`).join('')}</ul>
+      <p class="pg-p">Turn a recipe on and the site changes. Each one is the code from the docs, running on this visitor.</p>
+      <ul class="pg-list">${Object.entries(R.all).map(([k, r]) => `<li class="pg-item ${open === k ? 'now' : ''}" style="cursor:pointer" data-code="${k}"><button class="pg-toggle ${on.includes(k) && !r.locked ? 'on' : ''}" data-recipe="${k}" ${r.locked ? 'disabled' : ''} aria-label="toggle ${esc(r.title)}"><i></i></button><span class="grow">${esc(r.title)}</span><span class="r ${r.locked ? 'pg-yel' : ''}">${esc(r.where)}</span></li>`).join('')}</ul>
       ${open ? `<div>
-        <div class="pg-row"><span class="pg-label">${esc(R.all[open].title.toUpperCase())}</span><a href="${R.all[open].docs}" target="_blank" rel="noopener" style="margin-left:auto;font-size:12px">Docs</a><button class="pg-btn" data-copy="${open}">Copy</button></div>
+        <div class="pg-row"><span class="pg-label grow">${esc(R.all[open].title.toUpperCase())}</span><a href="${R.all[open].docs}" target="_blank" rel="noopener" class="small">Docs</a><button class="pg-btn" data-copy="${open}">Copy</button></div>
         <pre class="pg-mono" style="margin-top:8px">${esc(R.all[open].code)}</pre>
-        <span class="pg-p" style="font-size:12px;display:block;margin-top:6px">${R.all[open].locked ? 'Sandbox sites never receive moments. Add a card and put Sqid on a real site to see this one fire.' : S.traits ? `Running with ${esc(cap(S.traits.name) || S.traits.email)}'s profile. Click "Be someone else" in Scenarios to see it change.` : 'Waiting for an identified visitor.'}</span>
-      </div>` : '<span class="pg-muted">Click a recipe to see its code.</span>'}`;
-  }
-
-  function tabDelivery(st){
-    let rec = S.record;
-    let json = rec ? JSON.stringify(rec, null, 2) : null;
-    let hooks = S.webhooks || [];
-    return `
-      <div>
-        <span class="pg-label">WHERE IT GOES</span>
-        <ul class="pg-list" style="margin-top:8px">
-          ${hooks.map(h => `<li class="pg-item"><i style="width:8px;height:8px;border-radius:4px;background:${h.enabled ? '#4ade80' : '#52525b'};flex-shrink:0"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(h.url)}">${esc(h.url)}</span><span class="r"><button class="pg-btn" data-test="${esc(h.id)}">Send test</button></span></li>`).join('')}
-          <li class="pg-item"><form class="pg-row grow" data-form="webhook" style="width:100%"><input class="pg-input" name="url" type="url" placeholder="https://your-app.com/api/sqid" required><button class="pg-btn primary" type="submit">Add</button></form></li>
-        </ul>
-        <span class="pg-p" style="font-size:12px;display:block;margin-top:6px">Any https endpoint works, a request catcher included. Identified visitors on this site are delivered there as the record below.</span>
-      </div>
-      <div>
-        <div class="pg-row"><span class="pg-label">THIS VISITOR'S RECORD</span><span class="pg-mono pg-acc" style="font-size:11px">${rec ? 'profile ' + esc(String(S.visitor?.meta?.user_id || '').slice(0, 8)) + '…' : ''}</span>${json ? `<button class="pg-btn" style="margin-left:auto" data-copytext="record">Copy JSON</button>` : ''}</div>
-        ${json ? `<pre class="pg-mono" style="margin-top:8px;max-height:360px;overflow:auto" id="pg-record">${esc(json)}</pre>` : `<span class="pg-p" style="font-size:12px;display:block;margin-top:8px">${S.recordErr ? `Could not read the record: ${esc(S.recordErr)}` : S.identified ? 'Loading from the visitor API…' : 'Appears once this visitor is identified. It is the same record a webhook delivers.'}</span>`}
-        <div class="pg-row" style="margin-top:8px"><button class="pg-btn" data-act="sample">Show a webhook sample</button><a href="https://docs.sqid.dev/sdk/events" target="_blank" rel="noopener" style="margin-left:auto;font-size:12px">All the fields</a></div>
-        ${S.showSample ? `<pre class="pg-mono" style="margin-top:8px;max-height:280px;overflow:auto">${esc(JSON.stringify(S.sample, null, 2))}</pre>` : ''}
-      </div>
-      <div class="pg-card warn">
-        <span class="pg-label">MOMENTS ARE OFF IN THE SANDBOX</span>
-        <span class="pg-p" style="font-size:12px;color:#d4d4d8">Add a card to start the free credit and Signals turns on for your real site. The form stall or cart stall you cause here would then arrive as a moment with an instruction for your agent.</span>
-        <div class="pg-row"><a class="pg-btn yellow" href="${esc(st?.console || 'https://app.sqid.dev')}/billing" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;color:#0b0b0d">Start free credit</a><a href="https://docs.sqid.dev/guides/signals" target="_blank" rel="noopener" style="font-size:12px">About moments</a></div>
-      </div>`;
-  }
-
-  function tabGoLive(st){
-    let g = S.goLive;
-    return `
-      <h2 class="pg-h">Put Sqid on your own thing</h2>
-      <p class="pg-p">Same account, same snippet shape. Three ways in; each ends with the stream live and real identifications arriving.</p>
-      <div class="pg-card hi">
-        <div class="pg-row"><b>My website</b><span class="r pg-acc" style="margin-left:auto;font-size:11px">most people</span></div>
-        ${g ? `
-          <div class="pg-p" style="font-size:12px">Site <b style="color:#fafafa">${esc(g.site.name)}</b> created for ${esc(g.origins.join(', '))}. Paste this before &lt;/head&gt; on every page, deploy, open the site once.</div>
-          <pre class="pg-mono" id="pg-snippet">${esc(g.snippet)}</pre>
-          <div class="pg-row"><button class="pg-btn primary" data-copytext="snippet">Copy snippet</button><span class="pg-mono" style="font-size:11px;color:${g.status?.connected ? '#4ade80' : '#a1a1aa'}">${g.status?.connected ? 'Connected: the stream is live' : g.status?.deployed ? 'Page view seen, waiting for the connection…' : 'Waiting for the first page view…'}</span><button class="pg-btn" style="margin-left:auto" data-act="forget">Done</button></div>
-          <a href="${esc(st?.console || 'https://app.sqid.dev')}" target="_blank" rel="noopener" style="font-size:12px">Open the console</a>`
-        : `
-          <form data-form="site" style="display:flex;flex-direction:column;gap:8px">
-            <label class="pg-muted" style="font-size:12px">Public URL<input class="pg-input" name="url" type="url" placeholder="https://www.yourcompany.com" required style="margin-top:4px"></label>
-            <label class="pg-muted" style="font-size:12px">Name (optional)<input class="pg-input" name="name" type="text" placeholder="Marketing site" maxlength="50" style="margin-top:4px"></label>
-            <button class="pg-btn primary" type="submit">Create site and get my snippet</button>
-            ${S.goLiveErr ? `<span class="pg-yel" style="font-size:12px">${esc(S.goLiveErr)}</span>` : ''}
-          </form>
-          <span class="pg-p" style="font-size:12px">Makes the site on your account, shows the one script tag, then waits here for the first real page view.</span>`}
-      </div>
-      <div class="pg-card">
-        <b>My app, from my editor</b>
-        <span class="pg-p" style="font-size:12px">Claude Code pastes the snippet into your layout and writes the webhook handler in your framework.</span>
-        <pre class="pg-mono">claude mcp add --transport http sqid https://mcp.sqid.dev/mcp
-/sqid:setup</pre>
-        <pre class="pg-mono">npx -y @sqid-dev/sqid init</pre>
-      </div>
-      <div class="pg-card">
-        <b>Embedded in my product</b>
-        <span class="pg-p" style="font-size:12px">Identify visitors inside your own app or on your customers' sites. Server-side enrichment, the visitor API, and OEM terms for resale.</span>
-        <div class="pg-row"><a href="https://docs.sqid.dev/api-reference/overview" target="_blank" rel="noopener" style="font-size:12px">API reference</a><a href="https://sqid.dev/#oem" target="_blank" rel="noopener" style="font-size:12px">OEM program</a></div>
-      </div>
-      <div class="pg-card" style="background:#0e2a30;border-color:#155e75">
-        <div class="pg-row"><b>${esc(st?.plan?.name || 'Developer')} plan${st?.plan?.has ? '' : ' (starts with your first site)'}</b><span class="r" style="margin-left:auto;color:#a5f3fc">${st?.plan?.has ? 'you are on it' : 'free'}</span></div>
-        <span class="pg-p" style="font-size:12px;color:#d4d4d8">Real identifications start as soon as your site connects. Add a card to unlock the free credit, moments, and higher caps. No charge until you use it.</span>
-        <div class="pg-row"><a class="pg-btn accent" href="${esc(st?.console || 'https://app.sqid.dev')}/billing" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;color:#0b0b0d">Add a card</a><a href="https://sqid.dev/pricing" target="_blank" rel="noopener" style="font-size:12px">Compare plans</a></div>
-      </div>`;
+        <p class="pg-p small" style="margin-top:6px">${R.all[open].locked ? 'The Sandbox never sends moments. Put Sqid on a real site and turn Signals on to see this one fire.' : S.traits ? `Running with ${esc(cap(S.traits.name) || S.traits.email)}'s profile. "Be someone new" on the first screen changes it.` : 'Waiting for an identified visitor.'}</p>
+      </div>` : '<span class="pg-muted small">Click a recipe to see its code.</span>'}`;
   }
 
   // ---- wiring ---------------------------------------------------------------------------------------
   function wire(){
-    root.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => A.tab(b.dataset.tab)));
+    root.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => A.go(b.dataset.go)));
+    root.querySelectorAll('[data-explore]').forEach(b => b.addEventListener('click', () => A.explore(b.dataset.explore)));
     root.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
       let a = b.dataset.act;
       if(a === 'hide'){ A.hide(); } if(a === 'again'){ A.again(); } if(a === 'sample'){ A.sample(); } if(a === 'forget'){ A.forgetGoLive(); }
+      if(a === 'someone-new'){ A.someoneNew(b); }
+      if(a === 'explore'){ A.go(S.view === 'explore' ? 'home' : 'explore'); }
+      if(a === 'details'){ S.details = !S.details; render(); }
+      if(a === 'record'){ S.showRecord = !S.showRecord; render(); }
+      if(a === 'more'){ S.showMore = !S.showMore; render(); }
       if(a === 'clearlog'){ S.log = []; store.sset('log', []); render(); }
     }));
     root.querySelectorAll('[data-recipe]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); A.toggleRecipe(b.dataset.recipe); }));

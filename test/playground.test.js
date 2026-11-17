@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createApp } from '../src/server.js';
 import { parse } from '../src/index.js';
-import { localRecord } from '../src/sqid.js';
+import { localRecord, originsOf, withOrigin, Bridge } from '../src/sqid.js';
+import fs from 'node:fs';
 
 // A bridge that never touches Sqid.
 function fakeBridge(){
@@ -100,4 +101,81 @@ test('localRecord is deterministic per email and keeps the traits', () => {
   let a = localRecord({ email : 'ava.thornton@test.squid.io', firstName : 'ava' });
   let b = localRecord({ email : 'ava.thornton@test.squid.io', firstName : 'ava' });
   assert.deepEqual(a, b); assert.equal(a.firstName, 'ava'); assert.ok(a.lifetimeValue > 0);
+});
+
+// A site row as platform2 returns it: origins live only in the jwt payload (site, app).
+const jwtFor = (site, app) => `h.${Buffer.from(JSON.stringify({ sdk_id : 's1', site, app })).toString('base64url')}.sig`;
+
+test('originsOf reads the jwt the console reads; withOrigin only adds', () => {
+  assert.deepEqual(originsOf({ jwt : jwtFor('https://a.com,https://www.a.com', 'https://app.a.com') }), { site : ['https://a.com', 'https://www.a.com'], app : ['https://app.a.com'] });
+  assert.deepEqual(originsOf({ jwt : jwtFor('', null) }), { site : [], app : [] });
+  assert.equal(originsOf({ site_origins : ['https://a.com'] }), null, 'no jwt: unknown, not empty');
+  assert.equal(originsOf({ jwt : 'x.%%%.y' }), null);
+
+  let cur = { site : ['https://a.com'], app : ['https://a.com', 'https://app.a.com'] };
+  assert.deepEqual(withOrigin(cur, 'http://localhost:3000'), { site : ['https://a.com', 'http://localhost:3000'], app : ['https://a.com', 'https://app.a.com', 'http://localhost:3000'] });
+  assert.equal(withOrigin({ site : ['http://localhost:3000'], app : ['http://localhost:3000'] }, 'http://localhost:3000'), null);
+  assert.deepEqual(cur.site, ['https://a.com'], 'input untouched');
+});
+
+// A fake console API recording every call.
+function fakeApi({ jwt, failShow = false } = {}){
+  let calls = [];
+  let call = async (method, path, opts = {}) => {
+    calls.push({ method, path, body : opts.body });
+    if(method === 'GET' && path === '/api/sqid/me'){ return { email : 'dev@example.com' }; }
+    if(method === 'GET' && path === '/api/sqid/projects'){ return [{ _id : 'sb1', name : 'Sandbox', sandbox : true, jwt }]; }
+    if(method === 'GET' && path === '/api/projects/sb1'){ if(failShow){ throw new Error('boom'); } return { _id : 'sb1', name : 'Sandbox', jwt }; }
+    if(method === 'PATCH' && path === '/api/projects/sb1'){ return { ok : true }; }
+    if(method === 'GET' && /\/key_events$/.test(path)){ return { items : [] }; }
+    throw new Error(`unexpected ${method} ${path}`);
+  };
+  return { call, calls };
+}
+const signedIn = async () => ({ access_token : 't' });
+
+test('prepare keeps the origins set in the console and adds only the local one', async () => {
+  let { call, calls } = fakeApi({ jwt : jwtFor('https://staging.example.com', 'https://staging.example.com') });
+  let b = new Bridge({}, { api : call, readCredentials : signedIn });
+  let r = await b.prepare('http://localhost:3000');
+  assert.equal(r.originAdded, true);
+  assert.ok(calls.some(c => c.method === 'GET' && c.path === '/api/projects/sb1'), 'reads the site itself');
+  let patch = calls.find(c => c.method === 'PATCH');
+  assert.deepEqual(patch.body.site_origins, ['https://staging.example.com', 'http://localhost:3000']);
+  assert.deepEqual(patch.body.product_origins, ['https://staging.example.com', 'http://localhost:3000']);
+});
+
+test('prepare writes nothing when the origin is already there or the origins cannot be read', async () => {
+  let a = fakeApi({ jwt : jwtFor('https://x.com,http://localhost:3000', 'http://localhost:3000') });
+  let r = await new Bridge({}, { api : a.call, readCredentials : signedIn }).prepare('http://localhost:3000');
+  assert.equal(r.originAdded, false); assert.equal(r.originError, null);
+  assert.ok(!a.calls.some(c => c.method === 'PATCH'));
+
+  let b = fakeApi({ jwt : jwtFor('https://x.com', 'https://x.com'), failShow : true });
+  let r2 = await new Bridge({}, { api : b.call, readCredentials : signedIn }).prepare('http://localhost:3000');
+  assert.equal(r2.originAdded, false); assert.match(r2.originError, /boom/);
+  assert.ok(!b.calls.some(c => c.method === 'PATCH'), 'never PATCHes origins it could not read');
+});
+
+test('visitor events use the console route /key_events', async () => {
+  let { call, calls } = fakeApi({ jwt : jwtFor('http://localhost:3000', 'http://localhost:3000') });
+  let b = new Bridge({}, { api : call, readCredentials : signedIn });
+  await b.prepare('http://localhost:3000');
+  await b.visitorEvents('0123456789abcdef01234567');
+  assert.ok(calls.some(c => c.path === '/api/projects/sb1/profiles/0123456789abcdef01234567/key_events'));
+});
+
+test('panel wording: first screen, no private-window advice, accurate billing and prices', () => {
+  let panel = fs.readFileSync(new URL('../public/panel.js', import.meta.url), 'utf8');
+  let readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  for(let text of [panel, readme]){
+    assert.doesNotMatch(text, /private window (gets|to be)|a private window or another device gets/i);
+    assert.doesNotMatch(text, /No charge until you use it|Signals turns on/);
+  }
+  assert.match(panel, /Send this to my app/); assert.match(panel, /Put Sqid on my site/);
+  assert.match(panel, /Be someone new/); assert.match(panel, /squid\.anonymouse\(\)/);
+  assert.match(panel, /\$0\.25 each/); assert.match(panel, /25 welcome credits/);
+  assert.match(panel, /\$675\/month with 500 identifications\/month included/);
+  let prices = [...(panel + readme).matchAll(/\$\d[\d,.]*/g)].map(m => m[0]);
+  assert.deepEqual([...new Set(prices)].sort(), ['$0.25', '$675'], 'no other prices');
 });

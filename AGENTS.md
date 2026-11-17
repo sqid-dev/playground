@@ -12,7 +12,7 @@ sqid CLI, for auth and the API). No build step, no TypeScript, no bundler. Publi
 - `src/sqid.js` — `Bridge`: everything that touches the Sqid account. Only file that imports the CLI.
 - `src/server.js` — the Express app: pages plus `/_sqid/*` (localhost only).
 - `src/layout.js` — the Driftwood shell; `src/pages/<page>.html` are body fragments.
-- `public/panel.js` — the panel (six tabs). `public/recipes.js` — the docs recipes, runnable.
+- `public/panel.js` — the panel (the reveal, two next steps, Explore). `public/recipes.js` — the docs recipes, runnable.
   `public/site.js` — the site's own behaviour and the `sqid:page` events the panel listens to.
 
 ## Rules
