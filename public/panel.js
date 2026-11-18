@@ -340,9 +340,9 @@
       ${S.showMore ? `
         <div class="pg-card">
           <b>From my code editor</b>
-          <p class="pg-p small">Claude Code adds the code to your layout and writes the webhook handler for your framework. In a terminal (or in Claude Code, type ! first):</p>
-          <pre class="pg-mono">claude mcp add --transport http --scope user sqid https://mcp.sqid.dev/mcp</pre>
-          <p class="pg-p small">Then in Claude Code: <span class="pg-mono">/mcp</span>, pick sqid, Authenticate (your browser signs you in), and type <span class="pg-mono">/sqid:setup</span>. <a href="https://docs.sqid.dev/getting-started/agents" target="_blank" rel="noopener">Step by step</a></p>
+          <p class="pg-p small">Claude Code adds the code to your layout and writes the webhook handler for your framework. In a terminal window:</p>
+          <pre class="pg-mono">claude mcp add --transport http --scope user sqid https://mcp.sqid.dev/mcp && claude mcp login sqid</pre>
+          <p class="pg-p small">Your browser opens to sign you in. Then start Claude Code and type <span class="pg-mono">/sqid:setup</span>. <a href="https://docs.sqid.dev/getting-started/agents" target="_blank" rel="noopener">Step by step</a></p>
           <pre class="pg-mono">npx -y @sqid-dev/sqid init</pre>
         </div>
         <div class="pg-card">
