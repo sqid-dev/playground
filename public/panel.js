@@ -334,7 +334,7 @@
       <div class="pg-card">
         <b>Paying for it</b>
         <p class="pg-p small">The Sandbox is free. A real site uses prepaid credits on the Developer plan: $0.25 each. Add a card and you get 25 welcome credits. Nothing is charged unless you buy credits or turn on auto-reload. With no credits left, your site stops identifying new visitors until you add more.</p>
-        <div class="pg-row pg-wrap"><a class="pg-btn accent" href="${esc(CONSOLE())}/billing" target="_blank" rel="noopener">Add a card</a><a href="https://sqid.dev/pricing" target="_blank" rel="noopener" class="small">Pricing</a></div>
+        <div class="pg-row pg-wrap"><a class="pg-btn accent" href="${esc(CONSOLE())}/billing?add=card" target="_blank" rel="noopener">Add a card</a><a href="https://sqid.dev/pricing" target="_blank" rel="noopener" class="small">Pricing</a></div>
       </div>
       <button class="pg-link" data-act="more" aria-expanded="${!!S.showMore}">${S.showMore ? 'Hide other ways' : 'Other ways: from my code editor, or inside my product'}</button>
       ${S.showMore ? `
