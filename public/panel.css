@@ -115,3 +115,10 @@ pre.pg-mono{max-width:100%;margin:0;padding:12px;border-radius:8px;background:#1
   .pg-body{padding:14px 12px}
   .pg-reveal{gap:6px}
 }
+
+@media (min-width:1500px){
+  .pg-panel{font-size:14px}
+  .pg-top{font-size:13px;padding:12px 18px}
+  .pg-top .name{font-size:14px}
+  .pg-body{padding:20px 18px;gap:16px}
+}
