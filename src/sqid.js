@@ -159,7 +159,7 @@ export class Bridge {
 
   // Go live: a real site on the account, with its snippet.
   async createSite({ name, url }){
-    let origins = toOrigins(url);
+    let origins = withTwins(toOrigins(url));
     if(!origins.length){ throw Object.assign(new Error('Give the site\'s public URL, e.g. https://www.example.com'), { status : 400 }); }
     let me = await this.api('GET', '/api/sqid/me', { flags : this.flags });
     if(!me?.account?.hasSubscription){
@@ -199,4 +199,23 @@ export function localRecord(traits = {}){
     openTickets   : n % 3,
     source        : 'your database (mock)'
   };
+}
+
+// A public site is usually reached both with and without "www.": add the other one, so a visitor on
+// www.example.com is not refused because the site was created for example.com. Only for https
+// hosts: "www.x.y" adds "x.y", a bare two-label "x.y" adds "www.x.y". Local hosts, IPs and other
+// subdomains are left as given.
+function withTwins(origins){
+  let out = [...origins];
+  for(let o of origins){
+    try{
+      let u = new URL(o);
+      if(u.protocol !== 'https:' || /^[\d.]+$/.test(u.hostname) || u.hostname === 'localhost'){ continue; }
+      let h = u.hostname, twin = null;
+      if(h.startsWith('www.')){ twin = h.slice(4); }
+      else if(h.split('.').length === 2){ twin = `www.${h}`; }
+      if(twin && twin.includes('.')){ let t = `https://${twin}${u.port ? ':' + u.port : ''}`; if(!out.includes(t)){ out.push(t); } }
+    }catch(error){ /* skip */ }
+  }
+  return out;
 }
