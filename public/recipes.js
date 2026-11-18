@@ -78,9 +78,13 @@ engine.on('visitor.identified', (e) => {
 });`,
       apply(v, on){
         let w = document.getElementById('rc-chat');
-        if(!(v && on)){ w && w.remove(); return; }
+        let closed = false;
+        try{ closed = sessionStorage.getItem('rc-chat-closed') === '1'; }catch(e){}
+        if(!(v && on) || closed){ w && w.remove(); document.body.classList.remove('has-chat'); return; }
         if(!w){ w = document.createElement('div'); w.id = 'rc-chat'; w.className = 'rc-chat'; document.body.appendChild(w); }
-        w.innerHTML = `<div class="avatar" aria-hidden="true">D</div><div class="msg"><strong>Hi ${esc(first(v))}, want the Team quote for ${esc(company(v))}?</strong><span>The widget was handed the profile, so it never asks for an email.</span></div>`;
+        document.body.classList.add('has-chat');   // the footer makes room so the bubble never covers it
+        w.innerHTML = `<div class="avatar" aria-hidden="true">D</div><div class="msg"><strong>Hi ${esc(first(v))}, want the Team quote for ${esc(company(v))}?</strong><span>The widget was handed the profile, so it never asks for an email.</span></div><button type="button" class="rc-close" aria-label="Close">×</button>`;
+        w.querySelector('.rc-close').onclick = () => { try{ sessionStorage.setItem('rc-chat-closed', '1'); }catch(e){} w.remove(); document.body.classList.remove('has-chat'); };
       }
     },
     prefill : {

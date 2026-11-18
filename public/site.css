@@ -18,10 +18,13 @@ body.pg-panel-hidden .pg-panel{display:none}
 
 .site-nav{display:flex;align-items:center;gap:24px;padding:0 40px;height:64px;border-bottom:1px solid var(--line);font-size:14px;font-weight:500}
 .site-nav .brand{font-weight:700;font-size:19px;letter-spacing:-.02em;color:var(--ink)}
-.site-nav nav{display:flex;gap:22px}
+.site-nav nav{display:flex;gap:22px;align-self:stretch}
 .site-nav nav a,.nav-right a{color:var(--ink)}
 .nav-right a.btn-dark{color:#fff}
-.site-nav nav a.on{border-bottom:2px solid var(--ink);padding:20px 0}
+/* Every nav link is the full bar height with a transparent underline, so the current page only changes colour,
+   never position (no jump between pages). */
+.site-nav nav a{display:flex;align-items:center;border-bottom:2px solid transparent;border-top:2px solid transparent}
+.site-nav nav a.on{border-bottom-color:var(--ink)}
 .nav-right{margin-left:auto;display:flex;align-items:center;gap:18px}
 .cart-link span{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--bg-2);font-size:12px;text-align:center}
 .flash{margin:0;padding:10px 40px;background:var(--sea);border-bottom:1px solid var(--sea-line);color:var(--sea-ink);font-size:14px}
@@ -125,3 +128,14 @@ pre.code{padding:12px 14px;border-radius:8px;background:var(--bg-3);border:1px s
   .hero-copy p{font-size:19px;max-width:580px}
   .hero-art{height:380px}
 }
+
+/* Rhythm inside a page column: tiles and the actions after them get room to breathe. */
+.wrap > .tiles{margin:32px 0}
+.wrap > .tiles + .hero-actions{margin-top:0}
+.wrap > .lede + .hero-actions{margin-top:24px}
+
+/* The chat recipe's bubble: closable, and while it shows the footer leaves room under it. */
+.rc-chat{padding-right:36px}
+.rc-close{position:absolute;top:6px;right:8px;width:24px;height:24px;border:0;border-radius:12px;background:transparent;color:var(--ink-3);font-size:18px;line-height:1;cursor:pointer}
+.rc-close:hover{background:var(--bg-2);color:var(--ink)}
+body.has-chat .site-footer{padding-bottom:112px}
